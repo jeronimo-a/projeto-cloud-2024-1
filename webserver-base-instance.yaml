@@ -31,3 +31,12 @@ Resources:
     Properties:
       KeyName: admin-keypair
 
+  # instância EC2 na qual o webserver será instalado
+  WordpressBaseInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: t2.micro          # tamanho da instância
+      ImageId: ami-04b70fa74e45c3917	# ubuntu 24.04 x86
+      KeyName: !Ref WordpressKeyPair  # keypair configurado acima
+      SubnetId: !Ref WordpressSubnet  # faz com que a instância use a subnet definida acima
+
