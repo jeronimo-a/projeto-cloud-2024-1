@@ -1,5 +1,8 @@
 # projeto-cloud-2024-1
 
+## Requisitos:
+- Chave SSH RSA para acessar as instâncias.
+
 ## Etapas de implantação
 
 1. Criar um usuário com as permissões necessárias

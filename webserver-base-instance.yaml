@@ -7,6 +7,16 @@ Description: >
   Essa imagem será usada para definir o launch configuration do servidor
   para o auto scaling.
 
+# parâmetros de criação da stack
+Parameters:
+
+  # chave pública para acesso SSH às instâncias
+  KeyPairPublicKey:
+    Description: A chave pública para acesso SSH às instâncias EC2.
+    Type: String
+    ConstraintDescription: Deve ser do tipo SSH RSA.
+    Default: ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQCzDZEYWYF/G7qHlgvj0OyTuX4vIn+7zoembaKryWM8wwwUxM5nfl5Ny/AqRp3IZb+Xe+vnrnBwfVSNo3igbpagF2Xq8SvGqltmroEy8J3M0xsTlAGjVGjpKv4Z13mUny+Uj2xK+Rs8mU25uFA0U44iWE+UsFAxbHtsTVyWaQxFZnjpCn0dIwPkyjJEZ2wVZJyF7P0WmSNR6yV0RQJmvBU1i/20DYQRSyc28fmeJRsQmAj5533hCEMw2d5mTG6Xr7xO68CIk1K0yoENO2VRpPfbW5f3QG6hSN1mbmUgjG1ihEPbR18ZUdaRDyPzuZxsBub0pBZSMAAr90DEJnmzegf4yPKbCFXarvMRkaLKEAUVZ5ag3syguXuuqqSLak2fYA2tB5G875PXjhSMyCZQwIWlnvnkz23R+vl0c7VFbHJnGFJNJd+DP0XRXZ5rVqZTMfOuv4rxtn7h29c9IOAyl7SRb1JCxh3snrq7joijUA7wVftR1d1D+EMCtPey4yg6mxU= jeronimo@jeronimo-hp
+
 # recursos a serem criados
 Resources:
 
@@ -56,7 +66,7 @@ Resources:
     Type: 'AWS::EC2::RouteTable'
     Properties:
       VpcId: !Ref ProjectVPC
-      Tags:
+      Tags:                   # tags para fácil identificação
         - Key: Name
           Value: Project's Route Table
 
@@ -84,7 +94,7 @@ Resources:
     Type: AWS::EC2::KeyPair
     Properties:
       KeyName: admin-keypair
-      PublicKeyMaterial: ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQCzDZEYWYF/G7qHlgvj0OyTuX4vIn+7zoembaKryWM8wwwUxM5nfl5Ny/AqRp3IZb+Xe+vnrnBwfVSNo3igbpagF2Xq8SvGqltmroEy8J3M0xsTlAGjVGjpKv4Z13mUny+Uj2xK+Rs8mU25uFA0U44iWE+UsFAxbHtsTVyWaQxFZnjpCn0dIwPkyjJEZ2wVZJyF7P0WmSNR6yV0RQJmvBU1i/20DYQRSyc28fmeJRsQmAj5533hCEMw2d5mTG6Xr7xO68CIk1K0yoENO2VRpPfbW5f3QG6hSN1mbmUgjG1ihEPbR18ZUdaRDyPzuZxsBub0pBZSMAAr90DEJnmzegf4yPKbCFXarvMRkaLKEAUVZ5ag3syguXuuqqSLak2fYA2tB5G875PXjhSMyCZQwIWlnvnkz23R+vl0c7VFbHJnGFJNJd+DP0XRXZ5rVqZTMfOuv4rxtn7h29c9IOAyl7SRb1JCxh3snrq7joijUA7wVftR1d1D+EMCtPey4yg6mxU= jeronimo@jeronimo-hp
+      PublicKeyMaterial: !Ref KeyPairPublicKey
       Tags:                   # tags para fácil identificação
         - Key: Name
           Value: Project's Overall Key Pair
