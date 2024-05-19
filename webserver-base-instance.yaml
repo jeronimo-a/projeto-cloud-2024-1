@@ -1,17 +1,33 @@
 # versão padrão dos templates CloudFormation
 AWSTemplateFormatVersion: "2010-09-09"
 
-# descrição da template, para fins de documentação
+# descrição da stack, para fins de documentação
 Description: >
-Esse template gera uma stack que será usada para a criação da imagem base para
-o servidor web. Essa imagem será usada para definir o launch configuration do
-servidor para o auto scaling.
+  Essa stack é usada para a criação da imagem base para o servidor web.
+  Essa imagem será usada para definir o launch configuration do servidor
+  para o auto scaling.
 
 # recursos a serem criados
 Resources:
 
-	# instância EC2 na qual o webserver será instalado
-	EC2Instance:
-		Type: "AWS::EC2::Instance"
-		Properties:
-			ImageId: "ami-04b70fa74e45c3917"  # ubuntu 24.04 x86
+  # define a nuvem privada virtual
+  WordpressVPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: '10.0.0.0/16'
+      EnableDnsSupport: 'true'
+      EnableDnsHostnames: 'true'
+
+  # define uma subrede dentro da VPC
+  WordpressSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref WordpressVPC
+      CidrBlock: '10.0.0.0/24'
+
+  # define o keypair de acesso às instâncias EC2
+  WordpressKeyPair:
+    Type: AWS::EC2::KeyPair
+    Properties:
+      KeyName: admin-keypair
+
