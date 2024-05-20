@@ -139,9 +139,7 @@ Resources:
         - !Ref WebserverSecurityGroup         # acesso HTTP e HTTPS
         - !Ref SSHSecurityGroup               # acesso SSH
       UserData:
-        Fn::Base64: |
-          #!/bin/bash
-          touch ~ubuntu/teste.txt
+        Fn::Base64: !FindInMap [Scripts, Wordpress, Setup]  # script de configuração do webserver
       Tags:                                                 # tags para fácil identificação
         - Key: Name
           Value: Webserver Base Instance
@@ -159,3 +157,15 @@ Parameters:
     Type: String
     ConstraintDescription: Must be an SSH RSA public key.
     Default: ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQCzDZEYWYF/G7qHlgvj0OyTuX4vIn+7zoembaKryWM8wwwUxM5nfl5Ny/AqRp3IZb+Xe+vnrnBwfVSNo3igbpagF2Xq8SvGqltmroEy8J3M0xsTlAGjVGjpKv4Z13mUny+Uj2xK+Rs8mU25uFA0U44iWE+UsFAxbHtsTVyWaQxFZnjpCn0dIwPkyjJEZ2wVZJyF7P0WmSNR6yV0RQJmvBU1i/20DYQRSyc28fmeJRsQmAj5533hCEMw2d5mTG6Xr7xO68CIk1K0yoENO2VRpPfbW5f3QG6hSN1mbmUgjG1ihEPbR18ZUdaRDyPzuZxsBub0pBZSMAAr90DEJnmzegf4yPKbCFXarvMRkaLKEAUVZ5ag3syguXuuqqSLak2fYA2tB5G875PXjhSMyCZQwIWlnvnkz23R+vl0c7VFbHJnGFJNJd+DP0XRXZ5rVqZTMfOuv4rxtn7h29c9IOAyl7SRb1JCxh3snrq7joijUA7wVftR1d1D+EMCtPey4yg6mxU= jeronimo@jeronimo-hp
+
+# %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+# %%%%%%%%%% VARIÁVEIS %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+# %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+Mappings:
+
+  Scripts:
+    Wordpress:
+      Setup: |
+        #!/bin/bash
+        touch ~ubuntu/teste.txt
