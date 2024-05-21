@@ -194,14 +194,14 @@ Resources:
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
   # receita de criação da imagem do webserver, que será usada no autoscaling group
-  #WebserverImageRecipe:
-  #  Type: AWS::ImageBuilder::ImageRecipe
-  #  Properties: 
-  #    Name: webserver-image-recipe                          # nome da receita da imagem
-  #    Version: 1.0.0                                        # versão da imagem
-  #    ParentImage: ami-04b70fa74e45c3917                    # imagem original, Ubuntu 24.04 x86-64
-  #    Components:                                           # componentes de criação da imagem, apenas um
-  #      - ComponentArn: !GetAtt WebserverImageComponent.Arn # script de instalação e configuração do wordpress
+  WebserverImageRecipe:
+    Type: AWS::ImageBuilder::ImageRecipe
+    Properties: 
+      Name: webserver-image-recipe                          # nome da receita da imagem
+      Version: 1.0.0                                        # versão da imagem
+      ParentImage: ami-04b70fa74e45c3917                    # imagem original, Ubuntu 24.04 x86-64
+      Components:                                           # componentes de criação da imagem, apenas um
+        - ComponentArn: !GetAtt WebserverImageComponent.Arn # script de instalação e configuração do wordpress
   
   # componente da receita de criação da imagem do webserver, instala e configura o wordpress
   WebserverImageComponent:
