@@ -170,16 +170,16 @@ Resources:
   # base de dados MySQL
   # não usei DynamoDB porque o Wordpress não funciona de cara com DynamoDB
   # só descobri isso depois que configurei o wordpress, assim, teria que refazer um monte de coisas
-  MyDBInstance:
+  ProjectDBInstance:
     Type: AWS::RDS::DBInstance
     Properties:
-      DBInstanceIdentifier: project-mysql-db-instance   # identificador da instância
-      DBInstanceClass: db.t3.micro                      # não tem como ser maior que isso
-      Engine: mysql                                     # usar o MySQL
-      EngineVersion: 8.0                                # MySQL 8.0
-      MasterUsername: admin                             # usuário mestre
-      MasterUserPassword: password                      # senha qualquer
-      DBName: wp_database                               # base de dados para o wordpress
+      DBInstanceIdentifier: !Ref ProjectDBInstanceIdentifier  # identificador da instância
+      DBInstanceClass: db.t3.micro                            # não tem como ser maior que isso
+      Engine: mysql                                           # usar o MySQL
+      EngineVersion: 8.0                                      # MySQL 8.0
+      MasterUsername: !Ref DatabaseMasterUsername             # usuário mestre, é parâmetro da template
+      MasterUserPassword: !Ref DatabaseMasterUserPassword     # senha do usuário mestre, é parâmetro da template
+      DBName: wp_database                                     # base de dados para o wordpress
       AllocatedStorage: 20
       BackupRetentionPeriod: 7
       PreferredBackupWindow: "07:00-09:00"
@@ -196,10 +196,11 @@ Resources:
   # instância EC2 na qual o webserver será instalado
   WebserverBaseInstance:
     Type: AWS::EC2::Instance
-    CreationPolicy:     # faz com que a criação do recurso só seja considerada completa após algum "evento"
-      ResourceSignal:   # espera sinais de dentro da máquina
-        Count: 1        # espera apenas 1 sinal, que é enviado ao final do script de configuração do wordpress
-        Timeout: PT30M  # considera a criação mal sucedida se demorar mais de 30 minutos
+    DependsOn: ProjectDBInstance  # faz com que a instância só comece a ser criada quando a base de dados estiver pronta
+    CreationPolicy:               # faz com que a criação do recurso só seja considerada completa após algum "evento"
+      ResourceSignal:             # espera sinais de dentro da máquina
+        Count: 1                  # espera apenas 1 sinal, que é enviado ao final do script de configuração do wordpress
+        Timeout: PT30M            # considera a criação mal sucedida se demorar mais de 30 minutos
     Properties:
       InstanceType: t2.micro                  # tamanho da instância
       ImageId: ami-0bb84b8ffd87024d8	        # Amazon Linux 2023, mais fácil
@@ -254,6 +255,27 @@ Parameters:
     Type: String
     ConstraintDescription: Must be an SSH RSA public key.
     Default: ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQCzDZEYWYF/G7qHlgvj0OyTuX4vIn+7zoembaKryWM8wwwUxM5nfl5Ny/AqRp3IZb+Xe+vnrnBwfVSNo3igbpagF2Xq8SvGqltmroEy8J3M0xsTlAGjVGjpKv4Z13mUny+Uj2xK+Rs8mU25uFA0U44iWE+UsFAxbHtsTVyWaQxFZnjpCn0dIwPkyjJEZ2wVZJyF7P0WmSNR6yV0RQJmvBU1i/20DYQRSyc28fmeJRsQmAj5533hCEMw2d5mTG6Xr7xO68CIk1K0yoENO2VRpPfbW5f3QG6hSN1mbmUgjG1ihEPbR18ZUdaRDyPzuZxsBub0pBZSMAAr90DEJnmzegf4yPKbCFXarvMRkaLKEAUVZ5ag3syguXuuqqSLak2fYA2tB5G875PXjhSMyCZQwIWlnvnkz23R+vl0c7VFbHJnGFJNJd+DP0XRXZ5rVqZTMfOuv4rxtn7h29c9IOAyl7SRb1JCxh3snrq7joijUA7wVftR1d1D+EMCtPey4yg6mxU= jeronimo@jeronimo-hp
+  
+  # identificador da instância de base de dados
+  # para evitar conflitos com possíveis instâncias existentes com o mesmo identificador
+  ProjectDBInstanceIdentifier:
+    Description: Database instance identifier.
+    Type: String
+    ConstraintDescription: Must not contain spaces.
+    Default: project-mysql-db-instance
+
+  # senha do usuário mestre da base de dados
+  DatabaseMasterUserPassword:
+    Description: Master user password for the MySQL database.
+    Type: String
+    ConstraintDescription: Must be 8 characters or more.
+    Default: senha123
+
+  # usuário mestre da base de dadoss
+  DatabaseMasterUsername:
+    Description: Master username for the MySQL database.
+    Type: String
+    Default: admin
 
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 # %%%%%%%%%% VARIÁVEIS %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
