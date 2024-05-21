@@ -42,7 +42,7 @@ Resources:
     Type: AWS::EC2::Subnet
     Properties:
       VpcId: !Ref ProjectVPC
-      AvailabilityZone: us-east-1b
+      AvailabilityZone: us-east-1b  # availability zone diferente da sub-rede padrão
       CidrBlock: !FindInMap [CidrBlocks, Subnets, Redundancy]  # vem do mapping
       MapPublicIpOnLaunch: true
       Tags:                   # tags para fácil identificação
@@ -157,30 +157,37 @@ Resources:
 
   # subnets das bases de dados
   ProjectDBSubnetGroup:
-    Type: "AWS::RDS::DBSubnetGroup"
+    Type: AWS::RDS::DBSubnetGroup
     Properties:
       DBSubnetGroupDescription: "Subnet group for Aurora MySQL"
       SubnetIds:
-        - !Ref ProjectSubnet
-        - !Ref DatabaseRedundancySubnet
+        - !Ref ProjectSubnet              # sub-rede padrão
+        - !Ref DatabaseRedundancySubnet   # sub-rede extra em outra availability zone para redundância
+      Tags:                 # tags para melhor identificação
+        - Key: Name
+          Value: Database Subnet Group
 
-  # base de dados AuroraDB
+  # base de dados MySQL
   # não usei DynamoDB porque o Wordpress não funciona de cara com DynamoDB
   # só descobri isso depois que configurei o wordpress, assim, teria que refazer um monte de coisas
-  ProjectAuroraDBCluster:
-    Type: AWS::RDS::DBCluster
+  MyDBInstance:
+    Type: AWS::RDS::DBInstance
     Properties:
-      Engine: aurora-mysql                            # usa um base de dados MySQL
-      EngineVersion: 5.7.mysql_aurora.2.11.2          # versão do Aurora MySQL
-      DBClusterIdentifier: project-db-cluster         # identificador do cluster ao qual a instância pertencerá
-      MasterUsername: admin                           # usuário master
-      MasterUserPassword: senha123                    # senha do usuário master (pensar em algo que não exponha a senha)
-      DBSubnetGroupName: !Ref ProjectDBSubnetGroup
-      VpcSecurityGroupIds:
-        - !Ref MySQLSecurityGroup   # permite acesso SQL apenas de dentro da VPC
+      DBInstanceIdentifier: project-mysql-db-instance   # identificador da instância
+      DBInstanceClass: db.t3.micro                      # não tem como ser maior que isso
+      Engine: mysql                                     # usar o MySQL
+      EngineVersion: 8.0                                # MySQL 8.0
+      MasterUsername: admin                             # usuário mestre
+      MasterUserPassword: password                      # senha qualquer
+      DBName: wp_database                               # base de dados para o wordpress
+      AllocatedStorage: 20
       BackupRetentionPeriod: 7
       PreferredBackupWindow: "07:00-09:00"
       PreferredMaintenanceWindow: "Mon:01:00-Mon:03:00"
+      VPCSecurityGroups:
+        - !Ref MySQLSecurityGroup                       # permite acesso MySQL somente de dentro da VPC
+      DBSubnetGroupName: !Ref ProjectDBSubnetGroup      # grupo de subnets nas quais incluir a base de dados
+      PubliclyAccessible: true
 
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 # %%%%%%%%%% INSTÂNCIA BASE E CRIAÇÃO DA IMAGEM WEBSERVER %%%%%%%%%%%%%%%%%%
@@ -189,6 +196,10 @@ Resources:
   # instância EC2 na qual o webserver será instalado
   WebserverBaseInstance:
     Type: AWS::EC2::Instance
+    CreationPolicy:     # faz com que a criação do recurso só seja considerada completa após algum "evento"
+      ResourceSignal:   # espera sinais de dentro da máquina
+        Count: 1        # espera apenas 1 sinal, que é enviado ao final do script de configuração do wordpress
+        Timeout: PT30M  # considera a criação mal sucedida se demorar mais de 30 minutos
     Properties:
       InstanceType: t2.micro                  # tamanho da instância
       ImageId: ami-0bb84b8ffd87024d8	        # Amazon Linux 2023, mais fácil
@@ -197,15 +208,38 @@ Resources:
       SecurityGroupIds:
         - !Ref WebserverSecurityGroup         # acesso HTTP e HTTPS
         - !Ref SSHSecurityGroup               # acesso SSH %%%%%%%%%%%%% REMOVER %%%%%%%%%%%%%
-      UserData:
-        Fn::Base64: !FindInMap [Scripts, Wordpress, Setup]  # script de configuração do webserver
-      Tags:                                                 # tags para fácil identificação
+      Tags:                                   # tags para fácil identificação
         - Key: Name
           Value: Webserver Base Instance
-    CreationPolicy:     # faz com que a criação do recurso só seja considerada completa após algum "evento"
-      ResourceSignal:   # espera sinais de dentro da máquina
-        Count: 1        # espera apenas 1 sinal, que é enviado ao final do script de configuração do wordpress
-        Timeout: PT15M  # considera a criação mal sucedida se demorar mais de 15 minutos
+      UserData:
+        Fn::Base64: !Sub |                    # script de configuração do wordpress
+          #!/bin/bash
+          sudo su
+          echo "1" >> /var/log/installation.txt
+          dnf install wget php-mysqlnd httpd php-fpm php-mysqli mariadb105-server php-json php php-devel -y
+          echo "2" >> /var/log/installation.txt
+          wget https://wordpress.org/latest.tar.gz
+          echo "3" >> /var/log/installation.txt
+          tar -xzf latest.tar.gz
+          echo "4" >> /var/log/installation.txt
+          cp -r wordpress/* /var/www/html/
+          echo "5" >> /var/log/installation.txt
+          chown -R apache /var/www
+          echo "6" >> /var/log/installation.txt
+          chgrp -R apache /var/www
+          echo "7" >> /var/log/installation.txt
+          chmod 2775 /var/www
+          echo "8" >> /var/log/installation.txt
+          find /var/www -type d -exec chmod 2775 {} \;
+          echo "9" >> /var/log/installation.txt
+          find /var/www -type f -exec chmod 0644 {} \;
+          echo "10" >> /var/log/installation.txt
+          systemctl restart httpd
+          echo "11" >> /var/log/installation.txt
+          systemctl enable httpd
+          echo "12" >> /var/log/installation.txt
+          /opt/aws/bin/cfn-signal -e $? --stack ${AWS::StackName} --resource WebserverBaseInstance --region ${AWS::Region}
+          echo "Terminou" >> /var/log/installation.txt
 
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 # %%%%%%%%%% PARÂMETROS %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -234,23 +268,3 @@ Mappings:
     Subnets:
       Main: 10.0.0.0/24
       Redundancy: 10.0.1.0/24
-
-  Scripts:
-    Wordpress:
-
-      # script de configuração do wordpress a ser executado na primeira instância
-      Setup: |
-        #!/bin/bash
-        sudo su
-        dnf install wget php-mysqlnd httpd php-fpm php-mysqli mariadb105-server php-json php php-devel -y
-        wget https://wordpress.org/latest.tar.gz
-        tar -xzf latest.tar.gz
-        cp -r wordpress/* /var/www/html/
-        chown -R apache /var/www
-        chgrp -R apache /var/www
-        chmod 2775 /var/www
-        find /var/www -type d -exec sudo chmod 2775 {} \;
-        find /var/www -type f -exec sudo chmod 0644 {} \;
-        systemctl restart httpd
-        systemctl enable httpd
-        /opt/aws/bin/cfn-signal -e $? --stack teste --resource WebserverBaseInstance --region us-east-1
