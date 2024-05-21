@@ -190,62 +190,53 @@ Resources:
       PubliclyAccessible: true
 
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-# %%%%%%%%%% INSTÂNCIA BASE E CRIAÇÃO DA IMAGEM WEBSERVER %%%%%%%%%%%%%%%%%%
+# %%%%%%%%%% CRIAÇÃO DA IMAGEM WEBSERVER %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-  # instância EC2 na qual o webserver será instalado
-  WebserverBaseInstance:
-    Type: AWS::EC2::Instance
-    DependsOn: ProjectDBInstance  # faz com que a instância só comece a ser criada quando a base de dados estiver pronta
-    CreationPolicy:               # faz com que a criação do recurso só seja considerada completa após algum "evento"
-      ResourceSignal:             # espera sinais de dentro da máquina
-        Count: 1                  # espera apenas 1 sinal, que é enviado ao final do script de configuração do wordpress
-        Timeout: PT30M            # considera a criação mal sucedida se demorar mais de 30 minutos
-    Properties:
-      InstanceType: t2.micro                  # tamanho da instância
-      ImageId: ami-0bb84b8ffd87024d8	        # Amazon Linux 2023, mais fácil
-      KeyName: !Ref ProjectKeyPair            # keypair configurado acima
-      SubnetId: !Ref ProjectSubnet            # faz com que a instância use a subnet definida acima
-      SecurityGroupIds:
-        - !Ref WebserverSecurityGroup         # acesso HTTP e HTTPS
-        - !Ref SSHSecurityGroup               # acesso SSH %%%%%%%%%%%%% REMOVER %%%%%%%%%%%%%
-      Tags:                                   # tags para fácil identificação
-        - Key: Name
-          Value: Webserver Base Instance
-      UserData:
-        Fn::Base64: !Sub  # script de configuração do wordpress, instala e configura, o site fica pronto depois desse script
-          - |
-            #!/bin/bash
-            sudo su
-            dnf install wget php-mysqlnd httpd php-fpm php-mysqli mariadb105-server php-json php php-devel -y
-            wget https://wordpress.org/latest.tar.gz
-            tar -xzf latest.tar.gz
-            cp -r wordpress/* /var/www/html/
-            chown -R apache /var/www
-            chgrp -R apache /var/www
-            chmod 2775 /var/www
-            find /var/www -type d -exec chmod 2775 {} \;
-            find /var/www -type f -exec chmod 0644 {} \;
-            systemctl restart httpd
-            systemctl enable httpd
-            curl -O https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar
-            chmod +x wp-cli.phar
-            mv wp-cli.phar /usr/local/bin/wp
-            cd /var/www/html
-            wp config create --dbname=${DBName} --dbuser=${MasterUsername} --dbpass=${MasterUserPassword} --dbhost=${DBEndpoint} --allow-root
-            chown apache wp-config.php
-            TOKEN=`curl -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600"`
-            PUBLIC_DNS=`curl -H "X-aws-ec2-metadata-token: $TOKEN" -s http://169.254.169.254/latest/meta-data/public-hostname`
-            wp core install --url=http://$PUBLIC_DNS --title="${BlogTitle}" --admin_user="${AdminUsername}" --admin_password="${AdminUserPassword}" --admin_email="${AdminUserEMail}" --allow-root
-            /opt/aws/bin/cfn-signal -e $? --stack ${AWS::StackName} --resource WebserverBaseInstance --region ${AWS::Region}
-          - DBEndpoint: !GetAtt ProjectDBInstance.Endpoint.Address
-            DBName: !FindInMap [Wordpress, Database, Name]
-            MasterUsername: !FindInMap [Wordpress, Database, Username]
-            MasterUserPassword: !FindInMap [Wordpress, Database, Password]
-            AdminUsername: !FindInMap [Wordpress, Site, Username]
-            AdminUserPassword: !FindInMap [Wordpress, Site, Password]
-            AdminUserEMail: !FindInMap [Wordpress, Site, EMail]
-            BlogTitle: !FindInMap [Wordpress, Site, Title]
+  # receita de criação da imagem do webserver, que será usada no autoscaling group
+  #WebserverImageRecipe:
+  #  Type: AWS::ImageBuilder::ImageRecipe
+  #  Properties: 
+  #    Name: webserver-image-recipe                          # nome da receita da imagem
+  #    Version: 1.0.0                                        # versão da imagem
+  #    ParentImage: ami-04b70fa74e45c3917                    # imagem original, Ubuntu 24.04 x86-64
+  #    Components:                                           # componentes de criação da imagem, apenas um
+  #      - ComponentArn: !GetAtt WebserverImageComponent.Arn # script de instalação e configuração do wordpress
+  
+  # componente da receita de criação da imagem do webserver, instala e configura o wordpress
+  WebserverImageComponent:
+    Type: AWS::ImageBuilder::Component
+    Properties: 
+      Name: webserver-image-component   # nome do componente da receita
+      Version: 1.0.0                    # versão do componente da receita
+      Platform: Linux                   # somente para linux
+      Data: |
+        name: HelloWorldTestingLinuxDoc - InlineData
+        description: This is hello world testing doc
+        schemaVersion: 1.0
+
+        phases:
+          - name: build
+            steps:
+              - name: HelloWorldStep
+                action: ExecuteBash
+                inputs:
+                  commands:
+                    - echo "Hello World! Build." > /home/ubuntu/teste.txt
+          - name: validate
+            steps:
+              - name: HelloWorldStep
+                action: ExecuteBash
+                inputs:
+                  commands:
+                    - echo "Hello World! Validate." >> /home/ubuntu/teste.txt
+          - name: test
+            steps:
+              - name: HelloWorldStep
+                action: ExecuteBash
+                inputs:
+                  commands:
+                    - echo "Hello World! Test." >> /home/ubuntu/teste.txt
 
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 # %%%%%%%%%% PARÂMETROS %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
