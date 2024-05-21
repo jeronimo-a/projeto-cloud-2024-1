@@ -213,59 +213,31 @@ Resources:
         - Key: Name
           Value: Webserver Base Instance
       UserData:
-        Fn::Base64: !Sub  # script de configuração do wordpress
+        Fn::Base64: !Sub  # script de configuração do wordpress, instala e configura, o site fica pronto depois desse script
           - |
             #!/bin/bash
             sudo su
-            echo "1" >> /var/log/installation.txt
             dnf install wget php-mysqlnd httpd php-fpm php-mysqli mariadb105-server php-json php php-devel -y
-            echo "2" >> /var/log/installation.txt
             wget https://wordpress.org/latest.tar.gz
-            echo "3" >> /var/log/installation.txt
             tar -xzf latest.tar.gz
-            echo "4" >> /var/log/installation.txt
             cp -r wordpress/* /var/www/html/
-            echo "5" >> /var/log/installation.txt
             chown -R apache /var/www
-            echo "6" >> /var/log/installation.txt
             chgrp -R apache /var/www
-            echo "7" >> /var/log/installation.txt
             chmod 2775 /var/www
-            echo "8" >> /var/log/installation.txt
             find /var/www -type d -exec chmod 2775 {} \;
-            echo "9" >> /var/log/installation.txt
             find /var/www -type f -exec chmod 0644 {} \;
-            echo "10" >> /var/log/installation.txt
             systemctl restart httpd
-            echo "11" >> /var/log/installation.txt
             systemctl enable httpd
-            echo "12" >> /var/log/installation.txt
             curl -O https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar
-            echo "13" >> /var/log/installation.txt
             chmod +x wp-cli.phar
-            echo "14" >> /var/log/installation.txt
             mv wp-cli.phar /usr/local/bin/wp
-            echo "15" >> /var/log/installation.txt
             cd /var/www/html
             wp config create --dbname=${DBName} --dbuser=${MasterUsername} --dbpass=${MasterUserPassword} --dbhost=${DBEndpoint} --allow-root
-            echo "${DBName}" >> /var/log/installation.txt
-            echo "${MasterUsername}" >> /var/log/installation.txt
-            echo "${MasterUserPassword}" >> /var/log/installation.txt
-            echo "${DBEndpoint}" >> /var/log/installation.txt
             chown apache wp-config.php
-            echo "17" >> /var/log/installation.txt
             TOKEN=`curl -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600"`
-            echo $TOKEN >> /var/log/installation.txt
             PUBLIC_DNS=`curl -H "X-aws-ec2-metadata-token: $TOKEN" -s http://169.254.169.254/latest/meta-data/public-hostname`
-            echo $PUBLIC_DNS >> /var/log/installation.txt
-            echo "${BlogTitle}" >> /var/log/installation.txt
-            echo "${AdminUsername}" >> /var/log/installation.txt
-            echo "${AdminUserPassword}" >> /var/log/installation.txt
-            echo "${AdminUserEMail}" >> /var/log/installation.txt
             wp core install --url=http://$PUBLIC_DNS --title="${BlogTitle}" --admin_user="${AdminUsername}" --admin_password="${AdminUserPassword}" --admin_email="${AdminUserEMail}" --allow-root
-            echo "18" >> /var/log/installation.txt
             /opt/aws/bin/cfn-signal -e $? --stack ${AWS::StackName} --resource WebserverBaseInstance --region ${AWS::Region}
-            echo "Terminou" >> /var/log/installation.txt
           - DBEndpoint: !GetAtt ProjectDBInstance.Endpoint.Address
             DBName: !FindInMap [Wordpress, Database, Name]
             MasterUsername: !FindInMap [Wordpress, Database, Username]
