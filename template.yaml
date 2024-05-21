@@ -14,7 +14,7 @@ Resources:
   ProjectVPC:
     Type: AWS::EC2::VPC
     Properties:
-      CidrBlock: 10.0.0.0/16
+      CidrBlock: !FindInMap [CidrBlocks, Vpc, Main]
       EnableDnsSupport: true
       EnableDnsHostnames: true
       Tags:                   # tags para fácil identificação
@@ -30,11 +30,24 @@ Resources:
     Type: AWS::EC2::Subnet
     Properties:
       VpcId: !Ref ProjectVPC
-      CidrBlock: 10.0.0.0/24
+      AvailabilityZone: us-east-1a
+      CidrBlock: !FindInMap [CidrBlocks, Subnets, Main]  # vem do mapping
       MapPublicIpOnLaunch: true
       Tags:                   # tags para fácil identificação
         - Key: Name
           Value: Project's Main Subnet
+
+  # define uma subrede de redundância para a base de dados
+  DatabaseRedundancySubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref ProjectVPC
+      AvailabilityZone: us-east-1b
+      CidrBlock: !FindInMap [CidrBlocks, Subnets, Redundancy]  # vem do mapping
+      MapPublicIpOnLaunch: true
+      Tags:                   # tags para fácil identificação
+        - Key: Name
+          Value: Project's Database Redundancy Subnet
 
   # define o gateway de internet da VPC
   ProjectInternetGateway:
@@ -89,6 +102,21 @@ Resources:
         - Key: Name
           Value: Project's Overall Key Pair
 
+  # security group para acesso MySQL
+  MySQLSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: MySQL server security group, enables MySQL only.
+      VpcId: !Ref ProjectVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp           # libera acesso MySQL
+          FromPort: 3306
+          ToPort: 3306
+          CidrIp: !FindInMap [CidrBlocks, Vpc, Main] # apenas de dentro da VPC
+      Tags:                         # tags para fácil identificação
+        - Key: Name
+          Value: MySQL Security Group
+
   # security group para servidores web
   WebserverSecurityGroup:
     Type: AWS::EC2::SecurityGroup
@@ -124,6 +152,37 @@ Resources:
           Value: SSH Security Group
 
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+# %%%%%%%%%% BASE DE DADOS %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+# %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+  # subnets das bases de dados
+  ProjectDBSubnetGroup:
+    Type: "AWS::RDS::DBSubnetGroup"
+    Properties:
+      DBSubnetGroupDescription: "Subnet group for Aurora MySQL"
+      SubnetIds:
+        - !Ref ProjectSubnet
+        - !Ref DatabaseRedundancySubnet
+
+  # base de dados AuroraDB
+  # não usei DynamoDB porque o Wordpress não funciona de cara com DynamoDB
+  # só descobri isso depois que configurei o wordpress, assim, teria que refazer um monte de coisas
+  ProjectAuroraDBCluster:
+    Type: AWS::RDS::DBCluster
+    Properties:
+      Engine: aurora-mysql                            # usa um base de dados MySQL
+      EngineVersion: 5.7.mysql_aurora.2.11.2          # versão do Aurora MySQL
+      DBClusterIdentifier: project-db-cluster         # identificador do cluster ao qual a instância pertencerá
+      MasterUsername: admin                           # usuário master
+      MasterUserPassword: senha123                    # senha do usuário master (pensar em algo que não exponha a senha)
+      DBSubnetGroupName: !Ref ProjectDBSubnetGroup
+      VpcSecurityGroupIds:
+        - !Ref MySQLSecurityGroup   # permite acesso SQL apenas de dentro da VPC
+      BackupRetentionPeriod: 7
+      PreferredBackupWindow: "07:00-09:00"
+      PreferredMaintenanceWindow: "Mon:01:00-Mon:03:00"
+
+# %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 # %%%%%%%%%% INSTÂNCIA BASE E CRIAÇÃO DA IMAGEM WEBSERVER %%%%%%%%%%%%%%%%%%
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -131,13 +190,13 @@ Resources:
   WebserverBaseInstance:
     Type: AWS::EC2::Instance
     Properties:
-      InstanceType: t2.micro                  # tamanho da instância, para isso não precisa ser nada grande
+      InstanceType: t2.micro                  # tamanho da instância
       ImageId: ami-0bb84b8ffd87024d8	        # Amazon Linux 2023, mais fácil
       KeyName: !Ref ProjectKeyPair            # keypair configurado acima
       SubnetId: !Ref ProjectSubnet            # faz com que a instância use a subnet definida acima
       SecurityGroupIds:
         - !Ref WebserverSecurityGroup         # acesso HTTP e HTTPS
-        - !Ref SSHSecurityGroup               # acesso SSH
+        - !Ref SSHSecurityGroup               # acesso SSH %%%%%%%%%%%%% REMOVER %%%%%%%%%%%%%
       UserData:
         Fn::Base64: !FindInMap [Scripts, Wordpress, Setup]  # script de configuração do webserver
       Tags:                                                 # tags para fácil identificação
@@ -167,6 +226,15 @@ Parameters:
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 Mappings:
+
+  # configurações de rede
+  CidrBlocks:
+    Vpc:
+      Main: 10.0.0.0/16
+    Subnets:
+      Main: 10.0.0.0/24
+      Redundancy: 10.0.1.0/24
+
   Scripts:
     Wordpress:
 
