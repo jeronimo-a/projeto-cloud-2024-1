@@ -5,7 +5,7 @@ AWSTemplateFormatVersion: "2010-09-09"
 # todas as descrições estão em inglês porque o site da AWS mostra as descrições em ASCII
 # consequentemente dá problema com acentos
 Description: >
-  This stack is a wordpress website setup with load balancing and elastic scaling.
+  This stack is a wordpress website setup with MySQL and auto-scaling.
 
 # recursos a serem criados
 Resources:
@@ -14,7 +14,7 @@ Resources:
   ProjectVPC:
     Type: AWS::EC2::VPC
     Properties:
-      CidrBlock: !FindInMap [CidrBlocks, Vpc, Main]
+      CidrBlock: !FindInMap [Network, Vpc, Cidr]
       EnableDnsSupport: true
       EnableDnsHostnames: true
       Tags:                   # tags para fácil identificação
@@ -31,7 +31,7 @@ Resources:
     Properties:
       VpcId: !Ref ProjectVPC
       AvailabilityZone: us-east-1a
-      CidrBlock: !FindInMap [CidrBlocks, Subnets, Main]  # vem do mapping
+      CidrBlock: !FindInMap [Network, MainSubnet, Cidr]  # vem do mapping
       MapPublicIpOnLaunch: true
       Tags:                   # tags para fácil identificação
         - Key: Name
@@ -43,7 +43,7 @@ Resources:
     Properties:
       VpcId: !Ref ProjectVPC
       AvailabilityZone: us-east-1b  # availability zone diferente da sub-rede padrão
-      CidrBlock: !FindInMap [CidrBlocks, Subnets, Redundancy]  # vem do mapping
+      CidrBlock: !FindInMap [Network, DatabaseRedundancySubnet, Cidr]  # vem do mapping
       MapPublicIpOnLaunch: true
       Tags:                   # tags para fácil identificação
         - Key: Name
@@ -112,8 +112,8 @@ Resources:
         - IpProtocol: tcp           # libera acesso MySQL
           FromPort: 3306
           ToPort: 3306
-          CidrIp: !FindInMap [CidrBlocks, Vpc, Main] # apenas de dentro da VPC
-      Tags:                         # tags para fácil identificação
+          CidrIp: !FindInMap [Network, Vpc, Cidr] # apenas de dentro da VPC
+      Tags:                                       # tags para fácil identificação
         - Key: Name
           Value: MySQL Security Group
 
@@ -173,13 +173,13 @@ Resources:
   ProjectDBInstance:
     Type: AWS::RDS::DBInstance
     Properties:
-      DBInstanceIdentifier: !Ref ProjectDBInstanceIdentifier  # identificador da instância
-      DBInstanceClass: db.t3.micro                            # não tem como ser maior que isso
-      Engine: mysql                                           # usar o MySQL
-      EngineVersion: 8.0                                      # MySQL 8.0
-      MasterUsername: !Ref DatabaseMasterUsername             # usuário mestre, é parâmetro da template
-      MasterUserPassword: !Ref DatabaseMasterUserPassword     # senha do usuário mestre, é parâmetro da template
-      DBName: wp_database                                     # base de dados para o wordpress
+      DBInstanceIdentifier: !Ref ProjectDBInstanceIdentifier            # identificador da instância
+      DBInstanceClass: db.t3.micro                                      # não tem como ser maior que isso
+      Engine: mysql                                                     # usar o MySQL
+      EngineVersion: 8.0                                                # MySQL 8.0
+      MasterUsername: !FindInMap [Wordpress, MasterUser, Username]      # usuário mestre
+      MasterUserPassword: !FindInMap [Wordpress, MasterUser, Password]  # senha do usuário mestre
+      DBName: !FindInMap [Wordpress, Database, Name]                    # base de dados para o wordpress
       AllocatedStorage: 20
       BackupRetentionPeriod: 7
       PreferredBackupWindow: "07:00-09:00"
@@ -259,23 +259,10 @@ Parameters:
   # identificador da instância de base de dados
   # para evitar conflitos com possíveis instâncias existentes com o mesmo identificador
   ProjectDBInstanceIdentifier:
-    Description: Database instance identifier.
+    Description: Database instance identifier, only for debugging.
     Type: String
     ConstraintDescription: Must not contain spaces.
     Default: project-mysql-db-instance
-
-  # senha do usuário mestre da base de dados
-  DatabaseMasterUserPassword:
-    Description: Master user password for the MySQL database.
-    Type: String
-    ConstraintDescription: Must be 8 characters or more.
-    Default: senha123
-
-  # usuário mestre da base de dadoss
-  DatabaseMasterUsername:
-    Description: Master username for the MySQL database.
-    Type: String
-    Default: admin
 
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 # %%%%%%%%%% VARIÁVEIS %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -284,9 +271,18 @@ Parameters:
 Mappings:
 
   # configurações de rede
-  CidrBlocks:
+  Network:
     Vpc:
-      Main: 10.0.0.0/16
-    Subnets:
-      Main: 10.0.0.0/24
-      Redundancy: 10.0.1.0/24
+      Cidr: 10.0.0.0/16         # CIDR da VPC
+    MainSubnet:
+      Cidr: 10.0.0.0/24         # CIDR da sub-rede principal da VPC
+    DatabaseRedundancySubnet:
+      Cidr: 10.0.1.0/24         # CIDR da sub-rede de redundância da base de dados
+  
+  # configurações do wordpress
+  Wordpress:
+    MasterUser:
+      Username: admin     # nome do usuário mestre
+      Password: senha123  # senha do usuário mestre
+    Database:
+      Name: wordpress     # nome da base de dados do wordpress
