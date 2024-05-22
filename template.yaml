@@ -139,8 +139,8 @@ Resources:
         - IpProtocol: tcp     # libera acesso SSH
           FromPort: 22
           ToPort: 22
-          CidrIp: 0.0.0.0/0
-      Tags:                   # tags para fácil identificação
+          CidrIp: !Ref SSHAccessOriginCidr  # endereços dos quais as instâncias podem ser acessadas por SSH, é parâmetro da template
+      Tags:                                 # tags para fácil identificação
         - Key: Name
           Value: !Sub "Stack ${AWS::StackName} SSH Security Group"
 
@@ -336,6 +336,36 @@ Resources:
       DistributionConfigurationArn: !Ref WebserverDistributionConfiguration
 
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+# %%%%%%%%%% AUTO SCALING GROUP %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+# %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+  # launch configuration do autoscaling group
+  WebserverLaunchConfiguration:
+    Type: AWS::AutoScaling::LaunchConfiguration
+    Properties:
+      ImageId: !GetAtt WebserverImage.ImageId     # imagem do webserver configurada acima
+      InstanceType: t2.micro                      # tipo da instância, para esse fim, não precisa ser maior que isso
+      SecurityGroups:
+        - !Ref WebserverSecurityGroup     # permite acesso HTTP e HTTPS de qualquer origem
+        - !Ref SSHSecurityGroup           # permite acesso SSH, usado para debugging %%%REMOVER%%%
+      KeyName: !Ref ProjectKeyPair        # chave de acesso SSH, usada para debugging %%%REMOVER%%%
+
+  # autoscaling group dos servidores web
+  WebserverAutoScalingGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      LaunchConfigurationName: !Ref WebserverLaunchConfiguration  # launch configuration definida acima com a imagem do webserver
+      MinSize: '1'            # pelo menos uma instância a todo momento
+      MaxSize: '3'            # no máximo três instâncias
+      DesiredCapacity: '1'    # apenas uma instância sempre que possível
+      VPCZoneIdentifier:
+        - !Ref ProjectSubnet  # subrede principal do projeto
+      Tags:                   # tags para fácil identificação das instâncias
+        - Key: Name 
+          Value: "Stack ${AWS::StackName} Auto Scaling Webserver"
+          PropagateAtLaunch: true
+
+# %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 # %%%%%%%%%% PARÂMETROS %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -348,6 +378,12 @@ Parameters:
     Type: String
     ConstraintDescription: Must be an SSH RSA public key.
     Default: ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQCzDZEYWYF/G7qHlgvj0OyTuX4vIn+7zoembaKryWM8wwwUxM5nfl5Ny/AqRp3IZb+Xe+vnrnBwfVSNo3igbpagF2Xq8SvGqltmroEy8J3M0xsTlAGjVGjpKv4Z13mUny+Uj2xK+Rs8mU25uFA0U44iWE+UsFAxbHtsTVyWaQxFZnjpCn0dIwPkyjJEZ2wVZJyF7P0WmSNR6yV0RQJmvBU1i/20DYQRSyc28fmeJRsQmAj5533hCEMw2d5mTG6Xr7xO68CIk1K0yoENO2VRpPfbW5f3QG6hSN1mbmUgjG1ihEPbR18ZUdaRDyPzuZxsBub0pBZSMAAr90DEJnmzegf4yPKbCFXarvMRkaLKEAUVZ5ag3syguXuuqqSLak2fYA2tB5G875PXjhSMyCZQwIWlnvnkz23R+vl0c7VFbHJnGFJNJd+DP0XRXZ5rVqZTMfOuv4rxtn7h29c9IOAyl7SRb1JCxh3snrq7joijUA7wVftR1d1D+EMCtPey4yg6mxU= jeronimo@jeronimo-hp
+  
+  # CIDR de origem de acesso SSH
+  SSHAccessOriginCidr:
+    Description: Subnet from which to accept SSH connections, <IP_ADDRESS>/32 for a single address.
+    Type: String
+    ConstraintDescription: Must be in CIDR notation.
 
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 # %%%%%%%%%% VARIÁVEIS %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
