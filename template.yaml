@@ -155,54 +155,65 @@ Resources:
 # %%%%%%%%%% BASE DE DADOS %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-  # subnets das bases de dados
-  ProjectDBSubnetGroup:
-    Type: AWS::RDS::DBSubnetGroup
-    Properties:
-      DBSubnetGroupDescription: "Subnet group for Aurora MySQL"
-      SubnetIds:
-        - !Ref ProjectSubnet              # sub-rede padrão
-        - !Ref DatabaseRedundancySubnet   # sub-rede extra em outra availability zone para redundância
-      Tags:                 # tags para melhor identificação
-        - Key: Name
-          Value: Database Subnet Group
+  ## subnets das bases de dados
+  #ProjectDBSubnetGroup:
+  #  Type: AWS::RDS::DBSubnetGroup
+  #  Properties:
+  #    DBSubnetGroupDescription: "Subnet group for Aurora MySQL"
+  #    SubnetIds:
+  #      - !Ref ProjectSubnet              # sub-rede padrão
+  #      - !Ref DatabaseRedundancySubnet   # sub-rede extra em outra availability zone para redundância
+  #    Tags:                 # tags para melhor identificação
+  #      - Key: Name
+  #        Value: Database Subnet Group
 
-  # base de dados MySQL
-  # não usei DynamoDB porque o Wordpress não funciona de cara com DynamoDB
-  # só descobri isso depois que configurei o wordpress, assim, teria que refazer um monte de coisas
-  ProjectDBInstance:
-    Type: AWS::RDS::DBInstance
-    Properties:
-      DBInstanceIdentifier: !Ref ProjectDBInstanceIdentifier            # identificador da instância
-      DBInstanceClass: db.t3.micro                                      # não tem como ser maior que isso
-      Engine: mysql                                                     # usar o MySQL
-      EngineVersion: 8.0                                                # MySQL 8.0
-      MasterUsername: !FindInMap [Wordpress, Database, Username]        # usuário mestre
-      MasterUserPassword: !FindInMap [Wordpress, Database, Password]    # senha do usuário mestre
-      DBName: !FindInMap [Wordpress, Database, Name]                    # base de dados para o wordpress
-      AllocatedStorage: 20
-      BackupRetentionPeriod: 7
-      PreferredBackupWindow: "07:00-09:00"
-      PreferredMaintenanceWindow: "Mon:01:00-Mon:03:00"
-      VPCSecurityGroups:
-        - !Ref MySQLSecurityGroup                       # permite acesso MySQL somente de dentro da VPC
-      DBSubnetGroupName: !Ref ProjectDBSubnetGroup      # grupo de subnets nas quais incluir a base de dados
-      PubliclyAccessible: true
+  ## base de dados MySQL
+  ## não usei DynamoDB porque o Wordpress não funciona de cara com DynamoDB
+  ## só descobri isso depois que configurei o wordpress, assim, teria que refazer um monte de coisas
+  #ProjectDBInstance:
+  #  Type: AWS::RDS::DBInstance
+  #  Properties:
+  #    DBInstanceIdentifier: !Ref ProjectDBInstanceIdentifier            # identificador da instância
+  #    DBInstanceClass: db.t3.micro                                      # não tem como ser maior que isso
+  #    Engine: mysql                                                     # usar o MySQL
+  #    EngineVersion: 8.0                                                # MySQL 8.0
+  #    MasterUsername: !FindInMap [Wordpress, Database, Username]        # usuário mestre
+  #    MasterUserPassword: !FindInMap [Wordpress, Database, Password]    # senha do usuário mestre
+  #    DBName: !FindInMap [Wordpress, Database, Name]                    # base de dados para o wordpress
+  #    AllocatedStorage: 20
+  #    BackupRetentionPeriod: 7
+  #    PreferredBackupWindow: "07:00-09:00"
+  #    PreferredMaintenanceWindow: "Mon:01:00-Mon:03:00"
+  #    VPCSecurityGroups:
+  #      - !Ref MySQLSecurityGroup                       # permite acesso MySQL somente de dentro da VPC
+  #    DBSubnetGroupName: !Ref ProjectDBSubnetGroup      # grupo de subnets nas quais incluir a base de dados
+  #    PubliclyAccessible: true
 
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 # %%%%%%%%%% CRIAÇÃO DA IMAGEM WEBSERVER %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-  # receita de criação da imagem do webserver, que será usada no autoscaling group
-  WebserverImageRecipe:
-    Type: AWS::ImageBuilder::ImageRecipe
-    Properties: 
-      Name: webserver-image-recipe                          # nome da receita da imagem
-      Version: 1.0.0                                        # versão da imagem
-      ParentImage: ami-04b70fa74e45c3917                    # imagem original, Ubuntu 24.04 x86-64
-      Components:                                           # componentes de criação da imagem, apenas um
-        - ComponentArn: !GetAtt WebserverImageComponent.Arn # script de instalação e configuração do wordpress
-  
+  # função IAM para o perfil de instância EC2 que será usado para a criação da imagem
+  WebserverInstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AdministratorAccess
+
+  # perfil de instância que será usado para a criação da imagem
+  WebserverInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - !Ref WebserverInstanceRole
+
   # componente da receita de criação da imagem do webserver, instala e configura o wordpress
   WebserverImageComponent:
     Type: AWS::ImageBuilder::Component
@@ -237,6 +248,47 @@ Resources:
                 inputs:
                   commands:
                     - echo "Hello World! Test." >> /home/ubuntu/teste.txt
+
+  # receita de criação da imagem do webserver, que será usada no autoscaling group
+  WebserverImageRecipe:
+    Type: AWS::ImageBuilder::ImageRecipe
+    Properties: 
+      Name: webserver-image-recipe                          # nome da receita da imagem
+      Version: 1.0.0                                        # versão da imagem
+      ParentImage: ami-04b70fa74e45c3917                    # imagem original, Ubuntu 24.04 x86-64
+      Components:                                           # componentes de criação da imagem, apenas um
+        - ComponentArn: !GetAtt WebserverImageComponent.Arn # script de instalação e configuração do wordpress
+  
+  # configuração da infraestrutura de construção da imagem
+  WebserverInfrastructureConfiguration:
+    Type: AWS::ImageBuilder::InfrastructureConfiguration
+    Properties:
+      Name: webserver-infrastructure-configuration
+      InstanceTypes: 
+        - t2.micro
+      SecurityGroupIds:
+        - !Ref WebserverSecurityGroup
+        - !Ref SSHSecurityGroup
+      SubnetId: !Ref ProjectSubnet
+      InstanceProfileName: !Ref WebserverInstanceProfile
+
+  # configuração de distribuição da imagem
+  WebserverDistributionConfiguration:
+    Type: AWS::ImageBuilder::DistributionConfiguration
+    Properties:
+      Name: webserver-distribution-configuration
+      Distributions:
+        - Region: us-east-1
+          AmiDistributionConfiguration:
+            Name: webserver-image-{{ imagebuilder:buildDate }}
+    
+  # imagem do webserver
+  WebserverImage:
+    Type: AWS::ImageBuilder::Image
+    Properties:
+      ImageRecipeArn: !Ref WebserverImageRecipe
+      InfrastructureConfigurationArn: !Ref WebserverInfrastructureConfiguration
+      DistributionConfigurationArn: !Ref WebserverDistributionConfiguration
 
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 # %%%%%%%%%% PARÂMETROS %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
