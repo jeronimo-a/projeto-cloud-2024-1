@@ -187,6 +187,9 @@ Resources:
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
   # função IAM para o perfil de instância EC2 que será usado para a criação da imagem
+  # atribuí poderes administrativos para simplificar no processo de desenvolvimento
+  # em ambiente de produção seria uma má ideia deixar desse jeito, seria necessário
+  # atribuir somente as permissões necessárias
   WebserverInstanceRole:
     Type: AWS::IAM::Role
     Properties:
@@ -201,6 +204,7 @@ Resources:
         - arn:aws:iam::aws:policy/AdministratorAccess
 
   # perfil de instância que será usado para a criação da imagem
+  # na prática só faz uma ponte entre o role acima e a imagem em si
   WebserverInstanceProfile:
     Type: AWS::IAM::InstanceProfile
     Properties:
@@ -211,9 +215,12 @@ Resources:
   WebserverImageComponent:
     Type: AWS::ImageBuilder::Component
     Properties: 
-      Name: !Sub "${AWS::StackName}-webserver-image-component"  # nome do componente da receita
-      Version: 1.0.0                                            # versão do componente da receita
+      Name: !Sub "${AWS::StackName}-webserver-image-component"  # nome do componente
+      Version: 1.0.0                                            # versão do componente
       Platform: Linux                                           # somente para linux
+
+      # script que instala o wordpress e configura a base de dados
+      # para maior explicação, ver setup-script.sh
       Data: !Sub
             - |
               name: WordpressSetupScript - InlineData
@@ -277,15 +284,14 @@ Resources:
                           - 'TOKEN=`curl -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600"`'
                           - 'PUBLIC_DNS=`curl -H "X-aws-ec2-metadata-token: $TOKEN" -s http://169.254.169.254/latest/meta-data/public-hostname`'
                           - wp core install --url=http://$PUBLIC_DNS --title="${BlogTitle}" --admin_user="${AdminUsername}" --admin_password="${AdminUserPassword}" --admin_email="${AdminUserEMail}" --allow-root
-            - DBEndpoint: !GetAtt ProjectDBInstance.Endpoint.Address
-              DBName: !FindInMap [Wordpress, Database, Name]
-              MasterUsername: !FindInMap [Wordpress, Database, Username]
-              MasterUserPassword: !FindInMap [Wordpress, Database, Password]
-              AdminUsername: !FindInMap [Wordpress, Site, Username]
-              AdminUserPassword: !FindInMap [Wordpress, Site, Password]
-              AdminUserEMail: !FindInMap [Wordpress, Site, EMail]
-              BlogTitle: !FindInMap [Wordpress, Site, Title]
-
+            - DBEndpoint: !GetAtt ProjectDBInstance.Endpoint.Address          # endpoint da base de dados
+              DBName: !FindInMap [Wordpress, Database, Name]                  # nome da base de dados a ser usada pelo wordpress
+              MasterUsername: !FindInMap [Wordpress, Database, Username]      # usuário mestre da base de dados
+              MasterUserPassword: !FindInMap [Wordpress, Database, Password]  # senha do usuário mestre da base de dados
+              AdminUsername: !FindInMap [Wordpress, Site, Username]           # usuário admin do wordpress
+              AdminUserPassword: !FindInMap [Wordpress, Site, Password]       # senha do usuário admin do wordpress
+              AdminUserEMail: !FindInMap [Wordpress, Site, EMail]             # e-mail do usuário admin do wordpress
+              BlogTitle: !FindInMap [Wordpress, Site, Title]                  # título do blog do wordpress
 
   # receita de criação da imagem do webserver, que será usada no autoscaling group
   WebserverImageRecipe:
