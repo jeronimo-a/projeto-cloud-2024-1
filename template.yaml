@@ -19,7 +19,7 @@ Resources:
       EnableDnsHostnames: true
       Tags:                   # tags para fácil identificação
         - Key: Name
-          Value: Project's VPC
+          Value: !Sub "Stack ${AWS::StackName} VPC"
 
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 # %%%%%%%%%% CONFIGURAÇÕES DE REDE %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -35,7 +35,7 @@ Resources:
       MapPublicIpOnLaunch: true
       Tags:                   # tags para fácil identificação
         - Key: Name
-          Value: Project's Main Subnet
+          Value: !Sub "Stack ${AWS::StackName} Main Subnet"
 
   # define uma subrede de redundância para a base de dados
   DatabaseRedundancySubnet:
@@ -47,15 +47,11 @@ Resources:
       MapPublicIpOnLaunch: true
       Tags:                   # tags para fácil identificação
         - Key: Name
-          Value: Project's Database Redundancy Subnet
+          Value: !Sub "Stack ${AWS::StackName} Database Redundancy Subnet"
 
   # define o gateway de internet da VPC
   ProjectInternetGateway:
     Type: 'AWS::EC2::InternetGateway'
-    Properties:
-      Tags:                   # tags para fácil identificação
-        - Key: Name
-          Value: Project's VPC Internet Gateway
 
   # conecta o gateway de internet definido acima ao VPC
   ProjectVCPGatewayAttachment:
@@ -69,9 +65,6 @@ Resources:
     Type: 'AWS::EC2::RouteTable'
     Properties:
       VpcId: !Ref ProjectVPC
-      Tags:                   # tags para fácil identificação
-        - Key: Name
-          Value: Project's Route Table
 
   # route da VPC, é uma das regras contidas na route table (a única, neste caso)
   ProjectRoute:
@@ -96,11 +89,11 @@ Resources:
   ProjectKeyPair:
     Type: AWS::EC2::KeyPair
     Properties:
-      KeyName: admin-keypair
+      KeyName: !Sub "${AWS::StackName}-admin-keypair"
       PublicKeyMaterial: !Ref KeyPairPublicKey
       Tags:                   # tags para fácil identificação
         - Key: Name
-          Value: Project's Overall Key Pair
+          Value: !Sub "Stack ${AWS::StackName} Admin Key Pair"
 
   # security group para acesso MySQL
   MySQLSecurityGroup:
@@ -115,7 +108,7 @@ Resources:
           CidrIp: !FindInMap [Network, VPC, Cidr] # apenas de dentro da VPC
       Tags:                                       # tags para fácil identificação
         - Key: Name
-          Value: MySQL Security Group
+          Value: !Sub "Stack ${AWS::StackName} MySQL Security Group"
 
   # security group para servidores web
   WebserverSecurityGroup:
@@ -134,7 +127,7 @@ Resources:
           CidrIp: 0.0.0.0/0
       Tags:                   # tags para fácil identificação
         - Key: Name
-          Value: Webserver Security Group
+          Value: !Sub "Stack ${AWS::StackName} Webserver Security Group"
 
   # security group para acesso SSH
   SSHSecurityGroup:
@@ -149,7 +142,7 @@ Resources:
           CidrIp: 0.0.0.0/0
       Tags:                   # tags para fácil identificação
         - Key: Name
-          Value: SSH Security Group
+          Value: !Sub "Stack ${AWS::StackName} SSH Security Group"
 
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 # %%%%%%%%%% BASE DE DADOS %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -163,9 +156,9 @@ Resources:
       SubnetIds:
         - !Ref ProjectSubnet              # sub-rede padrão
         - !Ref DatabaseRedundancySubnet   # sub-rede extra em outra availability zone para redundância
-      Tags:                 # tags para melhor identificação
+      Tags:                               # tags para melhor identificação
         - Key: Name
-          Value: Database Subnet Group
+          Value: !Sub "Stack ${AWS::StackName} Database Subnet Group"
 
   # base de dados MySQL
   # não usei DynamoDB porque o Wordpress não funciona de cara com DynamoDB
@@ -173,7 +166,7 @@ Resources:
   ProjectDBInstance:
     Type: AWS::RDS::DBInstance
     Properties:
-      DBInstanceIdentifier: !Ref ProjectDBInstanceIdentifier            # identificador da instância
+      DBInstanceIdentifier: !Sub "${AWS::StackName}-mysql-database"     # identificador da instância
       DBInstanceClass: db.t3.micro                                      # não tem como ser maior que isso
       Engine: mysql                                                     # usar o MySQL
       EngineVersion: 8.0                                                # MySQL 8.0
@@ -190,62 +183,166 @@ Resources:
       PubliclyAccessible: true
 
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-# %%%%%%%%%% INSTÂNCIA BASE E CRIAÇÃO DA IMAGEM WEBSERVER %%%%%%%%%%%%%%%%%%
+# %%%%%%%%%% CRIAÇÃO DA IMAGEM WEBSERVER %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-  # instância EC2 na qual o webserver será instalado
-  WebserverBaseInstance:
+  # função IAM para o perfil de instância EC2 que será usado para a criação da imagem
+  WebserverInstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AdministratorAccess
+
+  # perfil de instância que será usado para a criação da imagem
+  WebserverInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - !Ref WebserverInstanceRole
+
+  # componente da receita de criação da imagem do webserver, instala e configura o wordpress
+  WebserverImageComponent:
+    Type: AWS::ImageBuilder::Component
+    Properties: 
+      Name: !Sub "${AWS::StackName}-webserver-image-component"  # nome do componente da receita
+      Version: 1.0.0                                            # versão do componente da receita
+      Platform: Linux                                           # somente para linux
+      Data: !Sub
+            - |
+              name: WordpressSetupScript - InlineData
+              description: This script installs wordpress and sets up the website in the database
+              schemaVersion: 1.0
+
+              phases:
+                - name: build
+                  steps:
+                    - name: install-dependencies
+                      action: ExecuteBash
+                      inputs:
+                        commands:
+                          - sudo apt update
+                          - sudo apt install -y apache2 ghostscript libapache2-mod-php php php-bcmath php-curl php-imagick php-intl php-json php-mbstring php-mysql php-xml php-zip curl
+                    - name: install-wordpress
+                      action: ExecuteBash
+                      inputs:
+                        commands:
+                          - sudo mkdir -p /srv/www
+                          - "sudo chown www-data: /srv/www"
+                          - curl https://wordpress.org/latest.tar.gz | sudo -u www-data tar zx -C /srv/www
+                    - name: install-wordpress-cli
+                      action: ExecuteBash
+                      inputs:
+                        commands:
+                          - sudo curl -O https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar
+                          - sudo chmod +x wp-cli.phar
+                          - sudo mv wp-cli.phar /usr/local/bin/wp
+                    - name: configure-apache
+                      action: ExecuteBash
+                      inputs:
+                        commands:
+                          - sudo su
+                          - |
+                            echo "<VirtualHost *:80>
+                                DocumentRoot /srv/www/wordpress
+                                <Directory /srv/www/wordpress>
+                                    Options FollowSymLinks
+                                    AllowOverride Limit Options FileInfo
+                                    DirectoryIndex index.php
+                                    Require all granted
+                                </Directory>
+                                <Directory /srv/www/wordpress/wp-content>
+                                    Options FollowSymLinks
+                                    Require all granted
+                                </Directory>
+                            </VirtualHost>" > /etc/apache2/sites-available/wordpress.conf
+                          - a2ensite wordpress
+                          - a2enmod rewrite
+                          - a2dissite 000-default
+                          - service apache2 reload
+                    - name: configure-database
+                      action: ExecuteBash
+                      inputs:
+                        commands:
+                          - sudo su
+                          - cd /srv/www/wordpress
+                          - wp config create --dbname=${DBName} --dbuser=${MasterUsername} --dbpass=${MasterUserPassword} --dbhost=${DBEndpoint} --allow-root
+                          - "chown www-data: wp-config.php"
+                          - 'TOKEN=`curl -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600"`'
+                          - 'PUBLIC_DNS=`curl -H "X-aws-ec2-metadata-token: $TOKEN" -s http://169.254.169.254/latest/meta-data/public-hostname`'
+                          - wp core install --url=http://$PUBLIC_DNS --title="${BlogTitle}" --admin_user="${AdminUsername}" --admin_password="${AdminUserPassword}" --admin_email="${AdminUserEMail}" --allow-root
+            - DBEndpoint: !GetAtt ProjectDBInstance.Endpoint.Address
+              DBName: !FindInMap [Wordpress, Database, Name]
+              MasterUsername: !FindInMap [Wordpress, Database, Username]
+              MasterUserPassword: !FindInMap [Wordpress, Database, Password]
+              AdminUsername: !FindInMap [Wordpress, Site, Username]
+              AdminUserPassword: !FindInMap [Wordpress, Site, Password]
+              AdminUserEMail: !FindInMap [Wordpress, Site, EMail]
+              BlogTitle: !FindInMap [Wordpress, Site, Title]
+
+
+  # receita de criação da imagem do webserver, que será usada no autoscaling group
+  WebserverImageRecipe:
+    Type: AWS::ImageBuilder::ImageRecipe
+    Properties: 
+      Name: !Sub "${AWS::StackName}-webserver-image-recipe" # nome da receita da imagem
+      Version: 1.0.0                                        # versão da imagem
+      ParentImage: ami-04b70fa74e45c3917                    # imagem original, Ubuntu 24.04 x86-64
+      Components:                                           # componentes de criação da imagem, apenas um
+        - ComponentArn: !Ref WebserverImageComponent        # script de instalação e configuração do wordpress
+  
+  # configuração da infraestrutura de construção da imagem
+  WebserverInfrastructureConfiguration:
+    Type: AWS::ImageBuilder::InfrastructureConfiguration
+    Properties:
+      Name: !Sub "${AWS::StackName}-webserver-infrastructure-configuration"
+      InstanceTypes: 
+        - t2.micro
+      SecurityGroupIds:
+        - !Ref WebserverSecurityGroup
+        - !Ref SSHSecurityGroup
+      SubnetId: !Ref ProjectSubnet
+      InstanceProfileName: !Ref WebserverInstanceProfile
+
+  # configuração de distribuição da imagem
+  WebserverDistributionConfiguration:
+    Type: AWS::ImageBuilder::DistributionConfiguration
+    Properties:
+      Name: !Sub "${AWS::StackName}-webserver-distribution-configuration"
+      Distributions:
+        - Region: us-east-1
+          AmiDistributionConfiguration:
+            Name: !Sub "${AWS::StackName}-webserver-image-{{ imagebuilder:buildDate }}"
+    
+  # imagem do webserver
+  WebserverImage:
+    Type: AWS::ImageBuilder::Image
+    DependsOn: ProjectDBInstance
+    Properties:
+      ImageRecipeArn: !Ref WebserverImageRecipe
+      InfrastructureConfigurationArn: !Ref WebserverInfrastructureConfiguration
+      DistributionConfigurationArn: !Ref WebserverDistributionConfiguration
+
+  # instância de teste
+  WebserverTestInstance:
     Type: AWS::EC2::Instance
-    DependsOn: ProjectDBInstance  # faz com que a instância só comece a ser criada quando a base de dados estiver pronta
-    CreationPolicy:               # faz com que a criação do recurso só seja considerada completa após algum "evento"
-      ResourceSignal:             # espera sinais de dentro da máquina
-        Count: 1                  # espera apenas 1 sinal, que é enviado ao final do script de configuração do wordpress
-        Timeout: PT30M            # considera a criação mal sucedida se demorar mais de 30 minutos
     Properties:
       InstanceType: t2.micro                  # tamanho da instância
-      ImageId: ami-0bb84b8ffd87024d8	        # Amazon Linux 2023, mais fácil
+      ImageId: !GetAtt WebserverImage.ImageId # imagem do webserver configurada acima
       KeyName: !Ref ProjectKeyPair            # keypair configurado acima
       SubnetId: !Ref ProjectSubnet            # faz com que a instância use a subnet definida acima
       SecurityGroupIds:
         - !Ref WebserverSecurityGroup         # acesso HTTP e HTTPS
-        - !Ref SSHSecurityGroup               # acesso SSH %%%%%%%%%%%%% REMOVER %%%%%%%%%%%%%
+        - !Ref SSHSecurityGroup               # acesso SSH
       Tags:                                   # tags para fácil identificação
         - Key: Name
-          Value: Webserver Base Instance
-      UserData:
-        Fn::Base64: !Sub  # script de configuração do wordpress, instala e configura, o site fica pronto depois desse script
-          - |
-            #!/bin/bash
-            sudo su
-            dnf install wget php-mysqlnd httpd php-fpm php-mysqli mariadb105-server php-json php php-devel -y
-            wget https://wordpress.org/latest.tar.gz
-            tar -xzf latest.tar.gz
-            cp -r wordpress/* /var/www/html/
-            chown -R apache /var/www
-            chgrp -R apache /var/www
-            chmod 2775 /var/www
-            find /var/www -type d -exec chmod 2775 {} \;
-            find /var/www -type f -exec chmod 0644 {} \;
-            systemctl restart httpd
-            systemctl enable httpd
-            curl -O https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar
-            chmod +x wp-cli.phar
-            mv wp-cli.phar /usr/local/bin/wp
-            cd /var/www/html
-            wp config create --dbname=${DBName} --dbuser=${MasterUsername} --dbpass=${MasterUserPassword} --dbhost=${DBEndpoint} --allow-root
-            chown apache wp-config.php
-            TOKEN=`curl -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600"`
-            PUBLIC_DNS=`curl -H "X-aws-ec2-metadata-token: $TOKEN" -s http://169.254.169.254/latest/meta-data/public-hostname`
-            wp core install --url=http://$PUBLIC_DNS --title="${BlogTitle}" --admin_user="${AdminUsername}" --admin_password="${AdminUserPassword}" --admin_email="${AdminUserEMail}" --allow-root
-            /opt/aws/bin/cfn-signal -e $? --stack ${AWS::StackName} --resource WebserverBaseInstance --region ${AWS::Region}
-          - DBEndpoint: !GetAtt ProjectDBInstance.Endpoint.Address
-            DBName: !FindInMap [Wordpress, Database, Name]
-            MasterUsername: !FindInMap [Wordpress, Database, Username]
-            MasterUserPassword: !FindInMap [Wordpress, Database, Password]
-            AdminUsername: !FindInMap [Wordpress, Site, Username]
-            AdminUserPassword: !FindInMap [Wordpress, Site, Password]
-            AdminUserEMail: !FindInMap [Wordpress, Site, EMail]
-            BlogTitle: !FindInMap [Wordpress, Site, Title]
+          Value: !Sub "Stack ${AWS::StackName} Webserver Test Instance"
 
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 # %%%%%%%%%% PARÂMETROS %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -260,14 +357,6 @@ Parameters:
     Type: String
     ConstraintDescription: Must be an SSH RSA public key.
     Default: ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQCzDZEYWYF/G7qHlgvj0OyTuX4vIn+7zoembaKryWM8wwwUxM5nfl5Ny/AqRp3IZb+Xe+vnrnBwfVSNo3igbpagF2Xq8SvGqltmroEy8J3M0xsTlAGjVGjpKv4Z13mUny+Uj2xK+Rs8mU25uFA0U44iWE+UsFAxbHtsTVyWaQxFZnjpCn0dIwPkyjJEZ2wVZJyF7P0WmSNR6yV0RQJmvBU1i/20DYQRSyc28fmeJRsQmAj5533hCEMw2d5mTG6Xr7xO68CIk1K0yoENO2VRpPfbW5f3QG6hSN1mbmUgjG1ihEPbR18ZUdaRDyPzuZxsBub0pBZSMAAr90DEJnmzegf4yPKbCFXarvMRkaLKEAUVZ5ag3syguXuuqqSLak2fYA2tB5G875PXjhSMyCZQwIWlnvnkz23R+vl0c7VFbHJnGFJNJd+DP0XRXZ5rVqZTMfOuv4rxtn7h29c9IOAyl7SRb1JCxh3snrq7joijUA7wVftR1d1D+EMCtPey4yg6mxU= jeronimo@jeronimo-hp
-  
-  # identificador da instância de base de dados
-  # para evitar conflitos com possíveis instâncias existentes com o mesmo identificador
-  ProjectDBInstanceIdentifier:
-    Description: Database instance identifier, only for debugging.
-    Type: String
-    ConstraintDescription: Must not contain spaces.
-    Default: project-mysql-db-instance
 
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 # %%%%%%%%%% VARIÁVEIS %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
