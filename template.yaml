@@ -148,39 +148,39 @@ Resources:
 # %%%%%%%%%% BASE DE DADOS %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-  ## subnets das bases de dados
-  #ProjectDBSubnetGroup:
-  #  Type: AWS::RDS::DBSubnetGroup
-  #  Properties:
-  #    DBSubnetGroupDescription: "Subnet group for Aurora MySQL"
-  #    SubnetIds:
-  #      - !Ref ProjectSubnet              # sub-rede padrão
-  #      - !Ref DatabaseRedundancySubnet   # sub-rede extra em outra availability zone para redundância
-  #    Tags:                               # tags para melhor identificação
-  #      - Key: Name
-  #        Value: !Sub "Stack ${AWS::StackName} Database Subnet Group"
+  # subnets das bases de dados
+  ProjectDBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: "Subnet group for Aurora MySQL"
+      SubnetIds:
+        - !Ref ProjectSubnet              # sub-rede padrão
+        - !Ref DatabaseRedundancySubnet   # sub-rede extra em outra availability zone para redundância
+      Tags:                               # tags para melhor identificação
+        - Key: Name
+          Value: !Sub "Stack ${AWS::StackName} Database Subnet Group"
 
-  ## base de dados MySQL
-  ## não usei DynamoDB porque o Wordpress não funciona de cara com DynamoDB
-  ## só descobri isso depois que configurei o wordpress, assim, teria que refazer um monte de coisas
-  #ProjectDBInstance:
-  #  Type: AWS::RDS::DBInstance
-  #  Properties:
-  #    DBInstanceIdentifier: Sub! "${AWS::StackName}-mysql-database"     # identificador da instância
-  #    DBInstanceClass: db.t3.micro                                      # não tem como ser maior que isso
-  #    Engine: mysql                                                     # usar o MySQL
-  #    EngineVersion: 8.0                                                # MySQL 8.0
-  #    MasterUsername: !FindInMap [Wordpress, Database, Username]        # usuário mestre
-  #    MasterUserPassword: !FindInMap [Wordpress, Database, Password]    # senha do usuário mestre
-  #    DBName: !FindInMap [Wordpress, Database, Name]                    # base de dados para o wordpress
-  #    AllocatedStorage: 20
-  #    BackupRetentionPeriod: 7
-  #    PreferredBackupWindow: "07:00-09:00"
-  #    PreferredMaintenanceWindow: "Mon:01:00-Mon:03:00"
-  #    VPCSecurityGroups:
-  #      - !Ref MySQLSecurityGroup                       # permite acesso MySQL somente de dentro da VPC
-  #    DBSubnetGroupName: !Ref ProjectDBSubnetGroup      # grupo de subnets nas quais incluir a base de dados
-  #    PubliclyAccessible: true
+  # base de dados MySQL
+  # não usei DynamoDB porque o Wordpress não funciona de cara com DynamoDB
+  # só descobri isso depois que configurei o wordpress, assim, teria que refazer um monte de coisas
+  ProjectDBInstance:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBInstanceIdentifier: !Sub "${AWS::StackName}-mysql-database"     # identificador da instância
+      DBInstanceClass: db.t3.micro                                      # não tem como ser maior que isso
+      Engine: mysql                                                     # usar o MySQL
+      EngineVersion: 8.0                                                # MySQL 8.0
+      MasterUsername: !FindInMap [Wordpress, Database, Username]        # usuário mestre
+      MasterUserPassword: !FindInMap [Wordpress, Database, Password]    # senha do usuário mestre
+      DBName: !FindInMap [Wordpress, Database, Name]                    # base de dados para o wordpress
+      AllocatedStorage: 20
+      BackupRetentionPeriod: 7
+      PreferredBackupWindow: "07:00-09:00"
+      PreferredMaintenanceWindow: "Mon:01:00-Mon:03:00"
+      VPCSecurityGroups:
+        - !Ref MySQLSecurityGroup                       # permite acesso MySQL somente de dentro da VPC
+      DBSubnetGroupName: !Ref ProjectDBSubnetGroup      # grupo de subnets nas quais incluir a base de dados
+      PubliclyAccessible: true
 
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 # %%%%%%%%%% CRIAÇÃO DA IMAGEM WEBSERVER %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -214,19 +214,78 @@ Resources:
       Name: !Sub "${AWS::StackName}-webserver-image-component"  # nome do componente da receita
       Version: 1.0.0                                            # versão do componente da receita
       Platform: Linux                                           # somente para linux
-      Data: |
-        name: HelloWorldTestingLinuxDoc - InlineData
-        description: This is hello world testing doc
-        schemaVersion: 1.0
+      Data: !Sub
+            - |
+              name: WordpressSetupScript - InlineData
+              description: This script installs wordpress and sets up the website in the database
+              schemaVersion: 1.0
 
-        phases:
-          - name: build
-            steps:
-              - name: HelloWorldStep
-                action: ExecuteBash
-                inputs:
-                  commands:
-                    - echo "Hello World! Build." > /home/ubuntu/teste.txt
+              phases:
+                - name: build
+                  steps:
+                    - name: install-dependencies
+                      action: ExecuteBash
+                      inputs:
+                        commands:
+                          - sudo apt update
+                          - sudo apt install -y apache2 ghostscript libapache2-mod-php php php-bcmath php-curl php-imagick php-intl php-json php-mbstring php-mysql php-xml php-zip curl
+                    - name: install-wordpress
+                      action: ExecuteBash
+                      inputs:
+                        commands:
+                          - sudo mkdir -p /srv/www
+                          - "sudo chown www-data: /srv/www"
+                          - curl https://wordpress.org/latest.tar.gz | sudo -u www-data tar zx -C /srv/www
+                    - name: install-wordpress-cli
+                      action: ExecuteBash
+                      inputs:
+                        commands:
+                          - sudo curl -O https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar
+                          - sudo chmod +x wp-cli.phar
+                          - sudo mv wp-cli.phar /usr/local/bin/wp
+                    - name: configure-apache
+                      action: ExecuteBash
+                      inputs:
+                        commands:
+                          - sudo su
+                          - |
+                            echo "<VirtualHost *:80>
+                                DocumentRoot /srv/www/wordpress
+                                <Directory /srv/www/wordpress>
+                                    Options FollowSymLinks
+                                    AllowOverride Limit Options FileInfo
+                                    DirectoryIndex index.php
+                                    Require all granted
+                                </Directory>
+                                <Directory /srv/www/wordpress/wp-content>
+                                    Options FollowSymLinks
+                                    Require all granted
+                                </Directory>
+                            </VirtualHost>" > /etc/apache2/sites-available/wordpress.conf
+                          - a2ensite wordpress
+                          - a2enmod rewrite
+                          - a2dissite 000-default
+                          - service apache2 reload
+                    - name: configure-database
+                      action: ExecuteBash
+                      inputs:
+                        commands:
+                          - sudo su
+                          - cd /srv/www/wordpress
+                          - wp config create --dbname=${DBName} --dbuser=${MasterUsername} --dbpass=${MasterUserPassword} --dbhost=${DBEndpoint} --allow-root
+                          - "chown www-data: wp-config.php"
+                          - 'TOKEN=`curl -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600"`'
+                          - 'PUBLIC_DNS=`curl -H "X-aws-ec2-metadata-token: $TOKEN" -s http://169.254.169.254/latest/meta-data/public-hostname`'
+                          - wp core install --url=http://$PUBLIC_DNS --title="${BlogTitle}" --admin_user="${AdminUsername}" --admin_password="${AdminUserPassword}" --admin_email="${AdminUserEMail}" --allow-root
+            - DBEndpoint: !GetAtt ProjectDBInstance.Endpoint.Address
+              DBName: !FindInMap [Wordpress, Database, Name]
+              MasterUsername: !FindInMap [Wordpress, Database, Username]
+              MasterUserPassword: !FindInMap [Wordpress, Database, Password]
+              AdminUsername: !FindInMap [Wordpress, Site, Username]
+              AdminUserPassword: !FindInMap [Wordpress, Site, Password]
+              AdminUserEMail: !FindInMap [Wordpress, Site, EMail]
+              BlogTitle: !FindInMap [Wordpress, Site, Title]
+
 
   # receita de criação da imagem do webserver, que será usada no autoscaling group
   WebserverImageRecipe:
@@ -264,6 +323,7 @@ Resources:
   # imagem do webserver
   WebserverImage:
     Type: AWS::ImageBuilder::Image
+    DependsOn: ProjectDBInstance
     Properties:
       ImageRecipeArn: !Ref WebserverImageRecipe
       InfrastructureConfigurationArn: !Ref WebserverInfrastructureConfiguration
