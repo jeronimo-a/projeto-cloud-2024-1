@@ -329,21 +329,6 @@ Resources:
       InfrastructureConfigurationArn: !Ref WebserverInfrastructureConfiguration
       DistributionConfigurationArn: !Ref WebserverDistributionConfiguration
 
-  # instância de teste
-  WebserverTestInstance:
-    Type: AWS::EC2::Instance
-    Properties:
-      InstanceType: t2.micro                  # tamanho da instância
-      ImageId: !GetAtt WebserverImage.ImageId # imagem do webserver configurada acima
-      KeyName: !Ref ProjectKeyPair            # keypair configurado acima
-      SubnetId: !Ref ProjectSubnet            # faz com que a instância use a subnet definida acima
-      SecurityGroupIds:
-        - !Ref WebserverSecurityGroup         # acesso HTTP e HTTPS
-        - !Ref SSHSecurityGroup               # acesso SSH
-      Tags:                                   # tags para fácil identificação
-        - Key: Name
-          Value: !Sub "Stack ${AWS::StackName} Webserver Test Instance"
-
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 # %%%%%%%%%% PARÂMETROS %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
