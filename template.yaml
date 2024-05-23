@@ -349,6 +349,14 @@ Resources:
         - !Ref WebserverSecurityGroup     # permite acesso HTTP e HTTPS de qualquer origem
         - !Ref SSHSecurityGroup           # permite acesso SSH, usado para debugging %%%REMOVER%%%
       KeyName: !Ref ProjectKeyPair        # chave de acesso SSH, usada para debugging %%%REMOVER%%%
+      UserData:
+        Fn::Base64: |             # script que atualiza a URL do site para o load balancer e a localização do site para a instância
+          #!/bin/bash
+          cd /srv/www/wordpress
+          TOKEN=`curl -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600"`
+          PUBLIC_DNS=`curl -H "X-aws-ec2-metadata-token: $TOKEN" -s http://169.254.169.254/latest/meta-data/public-hostname`
+          wp option update siteurl http://$PUBLIC_DNS --allow-root
+          wp option update home http://$PUBLIC_DNS --allow-root
 
   # autoscaling group dos servidores web
   WebserverAutoScalingGroup:
@@ -362,7 +370,7 @@ Resources:
         - !Ref ProjectSubnet  # subrede principal do projeto
       Tags:                   # tags para fácil identificação das instâncias
         - Key: Name 
-          Value: "Stack ${AWS::StackName} Auto Scaling Webserver"
+          Value: !Sub "Stack ${AWS::StackName} Auto Scaling Webserver"
           PropagateAtLaunch: true
 
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
