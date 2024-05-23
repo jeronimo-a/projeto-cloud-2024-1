@@ -51,32 +51,32 @@ Resources:
 
   # define o gateway de internet da VPC
   ProjectInternetGateway:
-    Type: 'AWS::EC2::InternetGateway'
+    Type: AWS::EC2::InternetGateway
 
   # conecta o gateway de internet definido acima ao VPC
-  ProjectVCPGatewayAttachment:
-    Type: 'AWS::EC2::VPCGatewayAttachment'
+  ProjectVPCGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
     Properties:
       VpcId: !Ref ProjectVPC
       InternetGatewayId: !Ref ProjectInternetGateway
 
   # route table da VPC, contém regras para transmissão de dados
   ProjectRouteTable:
-    Type: 'AWS::EC2::RouteTable'
+    Type: AWS::EC2::RouteTable
     Properties:
       VpcId: !Ref ProjectVPC
 
   # route da VPC, é uma das regras contidas na route table (a única, neste caso)
   ProjectRoute:
-    Type: 'AWS::EC2::Route'
+    Type: AWS::EC2::Route
     Properties:
       RouteTableId: !Ref ProjectRouteTable
       DestinationCidrBlock: '0.0.0.0/0'       # libera tráfego para qualquer lugar
       GatewayId: !Ref ProjectInternetGateway
 
-  # associa a route table criada à subnet
+  # associa a route table criada à subnet principal
   ProjectSubnetRouteTableAssociation:
-    Type: 'AWS::EC2::SubnetRouteTableAssociation'
+    Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
       SubnetId: !Ref ProjectSubnet
       RouteTableId: !Ref ProjectRouteTable
@@ -114,16 +114,12 @@ Resources:
   WebserverSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupDescription: Wordpress server security group, enables HTTP and HTTPS.
+      GroupDescription: Wordpress server security group, enables HTTP.
       VpcId: !Ref ProjectVPC
       SecurityGroupIngress:
         - IpProtocol: tcp     # libera acesso HTTP
           FromPort: 80
           ToPort: 80
-          CidrIp: 0.0.0.0/0
-        - IpProtocol: tcp     # libera acesso HTTPS
-          FromPort: 443
-          ToPort: 443
           CidrIp: 0.0.0.0/0
       Tags:                   # tags para fácil identificação
         - Key: Name
@@ -336,27 +332,72 @@ Resources:
       DistributionConfigurationArn: !Ref WebserverDistributionConfiguration
 
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+# %%%%%%%%%% LOAD BALANCER %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+# %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+  # recuros do load balancer em si
+  WebserverLoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: !Sub "${AWS::StackName}-webserver-load-balancer"  # nome com o nome da stack para clareza
+      Scheme: internet-facing                                 # aberto à internet
+      Subnets:      
+        - !Ref ProjectSubnet                                  # subrede principal do projeto
+        - !Ref DatabaseRedundancySubnet                       # subrede de redundância
+      SecurityGroups:
+        - !Ref WebserverSecurityGroup                         # permite apenas acesso HTTP
+
+  # target group do load balancer, que é o autoscaling group do webserver
+  WebserverTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Sub "${AWS::StackName}-target-group" # nome com o nome da stack para clareza
+      Port: 80                                                  # porta 80 somente
+      Protocol: HTTP                                            # HTTP somente
+      VpcId: !Ref ProjectVPC                                    # VPC do projeto
+      HealthCheckProtocol: HTTP                                 # protocolo do health check para direcionamento dos requests
+      HealthCheckPort: traffic-port                             # porta do health check, mesma porta definida acima
+      HealthCheckPath: /                                        # em que parte do site realizar o health check, em tudo
+      Matcher:
+        HttpCode: 200                                           # code 200 é um health check bom
+      TargetType: instance
+
+  # listener para o load balancer, encaminha os request para as instâncias do autoscaling group
+  HTTPListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref WebserverTargetGroup
+      LoadBalancerArn: !Ref WebserverLoadBalancer
+      Port: 80
+      Protocol: HTTP
+
+# %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 # %%%%%%%%%% AUTO SCALING GROUP %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
   # launch configuration do autoscaling group
   WebserverLaunchConfiguration:
+    DependsOn: WebserverLoadBalancer
     Type: AWS::AutoScaling::LaunchConfiguration
     Properties:
       ImageId: !GetAtt WebserverImage.ImageId     # imagem do webserver configurada acima
       InstanceType: t2.micro                      # tipo da instância, para esse fim, não precisa ser maior que isso
       SecurityGroups:
-        - !Ref WebserverSecurityGroup     # permite acesso HTTP e HTTPS de qualquer origem
+        - !Ref WebserverSecurityGroup     # permite acesso HTTP de qualquer origem
         - !Ref SSHSecurityGroup           # permite acesso SSH, usado para debugging %%%REMOVER%%%
       KeyName: !Ref ProjectKeyPair        # chave de acesso SSH, usada para debugging %%%REMOVER%%%
       UserData:
-        Fn::Base64: |             # script que atualiza a URL do site para o load balancer e a localização do site para a instância
+        Fn::Base64: !Sub                  # script que atualiza a URL do site para o load balancer e a localização do site para a instância
+        - |
           #!/bin/bash
           cd /srv/www/wordpress
           TOKEN=`curl -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600"`
           PUBLIC_DNS=`curl -H "X-aws-ec2-metadata-token: $TOKEN" -s http://169.254.169.254/latest/meta-data/public-hostname`
           wp option update siteurl http://$PUBLIC_DNS --allow-root
-          wp option update home http://$PUBLIC_DNS --allow-root
+          wp option update home "http://${LoadBalancerName}" --allow-root
+        - LoadBalancerName: !GetAtt WebserverLoadBalancer.DNSName   # URL do load balancer
 
   # autoscaling group dos servidores web
   WebserverAutoScalingGroup:
@@ -368,10 +409,68 @@ Resources:
       DesiredCapacity: '1'    # apenas uma instância sempre que possível
       VPCZoneIdentifier:
         - !Ref ProjectSubnet  # subrede principal do projeto
+      TargetGroupARNs:
+        - !Ref WebserverTargetGroup
       Tags:                   # tags para fácil identificação das instâncias
         - Key: Name 
           Value: !Sub "Stack ${AWS::StackName} Auto Scaling Webserver"
           PropagateAtLaunch: true
+
+  # cloudwatch alarm para identificar quando a utilização da CPU fica alta demais
+  WebserverHighCPUAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: "Alarm when average CPU utilization exceeds 70%"
+      Namespace: AWS/EC2
+      MetricName: CPUUtilization                # quando utilização de CPU
+      Statistic: Average                        # média
+      Dimensions:                               
+        - Name: AutoScalingGroupName            
+          Value: !Ref WebserverAutoScalingGroup # no auto scaling group dos servidores web
+      ComparisonOperator: GreaterThanThreshold  # for mais de
+      Threshold: 70                             # 70%
+      Period: 180                               # por 3 minutos
+      EvaluationPeriods: 2               
+      AlarmActions:
+        - !Ref WebserverScaleUpPolicy           # aumenta a capacidade
+
+  # cloudwatch alarm para identificar quando a utilização da CPU fica baixa demais
+  WebserverLowCPUAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: "Alarm when average CPU utilization falls below 20%"
+      Namespace: AWS/EC2
+      MetricName: CPUUtilization                # quando utilização de CPU
+      Statistic: Average                        # média
+      Dimensions:                               
+        - Name: AutoScalingGroupName            
+          Value: !Ref WebserverAutoScalingGroup # no auto scaling group dos servidores web
+      ComparisonOperator: LessThanThreshold     # for menos de
+      Threshold: 20                             # 20%
+      Period: 180                               # por 3 minutos
+      EvaluationPeriods: 2               
+      AlarmActions:
+        - !Ref WebserverScaleDownPolicy         # diminui a capacidade
+
+  # política de aumento de capacidade
+  WebserverScaleUpPolicy:
+    Type: AWS::AutoScaling::ScalingPolicy
+    Properties:
+      AutoScalingGroupName: !Ref WebserverAutoScalingGroup
+      PolicyType: SimpleScaling
+      AdjustmentType: ChangeInCapacity
+      ScalingAdjustment: 1
+      Cooldown: 300
+
+  # política de redução de capacidade
+  WebserverScaleDownPolicy:
+    Type: AWS::AutoScaling::ScalingPolicy
+    Properties:
+      AutoScalingGroupName: !Ref WebserverAutoScalingGroup
+      PolicyType: SimpleScaling
+      AdjustmentType: ChangeInCapacity
+      ScalingAdjustment: -1
+      Cooldown: 300
 
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 # %%%%%%%%%% PARÂMETROS %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -419,3 +518,24 @@ Mappings:
       Username: admin         # nome do usuário admin do site
       Password: senha123      # senha do usuário admin do site
       EMail: admin@admin.com  # email do usuário admin do site
+
+# %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+# %%%%%%%%%% OUTPUTS %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+# %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+Outputs:
+
+  # mostra o nome do load balancer nos outputs da stack
+  LoadBalancerDNSName:
+    Description: DNS name of the Load Balancer
+    Value: !GetAtt WebserverLoadBalancer.DNSName
+
+  # mostra o nome de usuário admin do wordpress
+  WordpressAdminUsername:
+    Description: Username of the WordPress admin user
+    Value: !FindInMap [Wordpress, Site, Username]
+
+  # mostra a senha do usuário administrativo do wordpress
+  WordpressAdminPassword:
+    Description: Password of the WordPress admin user
+    Value: !FindInMap [Wordpress, Site, Password]
